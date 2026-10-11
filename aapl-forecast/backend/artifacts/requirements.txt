@@ -1,0 +1,10 @@
+# IMPORTANT: match tensorflow / keras / scikit-learn / numpy to your Google Colab versions.
+# In Colab run:  import tensorflow as tf, sklearn, numpy; print(tf.__version__, sklearn.__version__, numpy.__version__)
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+tensorflow-cpu==2.19.0
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.6.1
+joblib==1.4.2
+yfinance>=0.2.54
