@@ -20,9 +20,13 @@ class Predictor:
         with open(config.CONFIG_PATH) as fh:
             cfg = json.load(fh)
 
-        self.features = list(cfg["features"])
-        self.window = int(cfg["lookback"])
-        self.bounds = cfg.get("iqr_clip_bounds", {})   # {"Volume": [lo, hi], "High": [lo, hi]}
+        default_features = ["Open", "High", "Low", "Close", "Volume",
+                           "RSI", "MACD", "EMA20", "month", "day", "weekday"]
+        self.features = list(cfg.get("features") or default_features)
+        self.window = int(cfg.get("lookback", 60))
+        self.bounds = cfg.get("iqr_clip_bounds") or {}
+        if not self.bounds:
+            log.warning("config.json has no iqr_clip_bounds: High/Volume will not be clipped")   # {"Volume": [lo, hi], "High": [lo, hi]}
 
         nf = len(self.features)
         if getattr(self.scaler, "n_features_in_", nf) != nf:
