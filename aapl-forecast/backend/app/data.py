@@ -1,0 +1,74 @@
+import logging
+import time
+from datetime import date, datetime, time as dtime, timedelta
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import yfinance as yf
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar, GoodFriday, Holiday, USLaborDay, USMartinLutherKingJr,
+    USMemorialDay, USPresidentsDay, USThanksgivingDay, nearest_workday,
+)
+
+from . import config
+
+log = logging.getLogger("data")
+NY = ZoneInfo("America/New_York")
+_cache = {"df": None, "at": 0.0}
+
+
+class NYSECalendar(AbstractHolidayCalendar):
+    rules = [
+        Holiday("NewYear", month=1, day=1, observance=nearest_workday),
+        USMartinLutherKingJr, USPresidentsDay, GoodFriday, USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01", observance=nearest_workday),
+        Holiday("July4", month=7, day=4, observance=nearest_workday),
+        USLaborDay, USThanksgivingDay,
+        Holiday("Christmas", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+def _download() -> pd.DataFrame:
+    df = yf.download(
+        config.TICKER, period="2y", interval="1d",
+        progress=False, auto_adjust=True, threads=False,
+    )
+    if df is None or df.empty:
+        raise RuntimeError("Yahoo Finance returned no data")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.dropna()
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    return df
+
+
+def get_daily() -> pd.DataFrame:
+    """Daily OHLCV, cached. Falls back to stale cache if Yahoo fails."""
+    now = time.time()
+    if _cache["df"] is not None and now - _cache["at"] < config.DATA_CACHE_SECONDS:
+        return _cache["df"]
+    try:
+        df = _download()
+        _cache.update(df=df, at=now)
+        return df
+    except Exception as exc:
+        log.warning("download failed: %s", exc)
+        if _cache["df"] is not None:
+            return _cache["df"]
+        raise
+
+
+def completed_bars(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop today's bar while the US market is still open (it is incomplete)."""
+    now = datetime.now(NY)
+    if df.index[-1].date() == now.date() and now.time() < dtime(16, 15):
+        return df.iloc[:-1]
+    return df
+
+
+def next_trading_day(d: date) -> date:
+    hol = {h.date() for h in NYSECalendar().holidays(d, d + timedelta(days=15))}
+    nxt = d + timedelta(days=1)
+    while nxt.weekday() >= 5 or nxt in hol:
+        nxt += timedelta(days=1)
+    return nxt
