@@ -1,7 +1,11 @@
 // =========================================================================
 // Config + small helpers
 // =========================================================================
-const API = window.API_BASE || "";
+// Strip trailing slashes so API + "/api/x" never becomes "//api/x".
+const API = (
+  window.API_BASE || "https://stock-pred-cnn-lstm.onrender.com"
+).replace(/\/+$/, "");
+
 const $ = (id) => document.getElementById(id);
 const css = (name) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -12,21 +16,38 @@ const usd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+
 async function getJSON(path) {
-  const res = await fetch(API + path, { cache: "no-store" });
+  const url = API + path;
+  let res;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch (e) {
+    throw new Error(
+      `Network error → ${url} ` +
+        `[${e.name}: ${
+          e.message || "no message — usually CORS, mixed content, or host down"
+        }]`
+    );
+  }
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = `HTTP ${res.status} ${res.statusText}`;
     try {
       const body = await res.json();
-      if (body && body.detail) detail = body.detail;
+      if (body && body.detail) detail += ` — ${body.detail}`;
     } catch (_) {}
-    throw new Error(detail);
+    throw new Error(`${detail} (${url})`);
   }
-  return res.json();
+  try {
+    return await res.json();
+  } catch (_) {
+    throw new Error(`Response from ${url} was not valid JSON`);
+  }
 }
 
 // =========================================================================
-// THEME  (new)
+// THEME
 // =========================================================================
 const root = document.documentElement;
 const charts = [];
@@ -40,9 +61,11 @@ function themeCharts() {
 
   Chart.defaults.color = css("--muted");
   Chart.defaults.borderColor = css("--rule");
-  Chart.defaults.plugins.tooltip.backgroundColor = css("--ink");
-  Chart.defaults.plugins.tooltip.titleColor = css("--paper");
-  Chart.defaults.plugins.tooltip.bodyColor = css("--paper");
+  if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
+    Chart.defaults.plugins.tooltip.backgroundColor = css("--ink");
+    Chart.defaults.plugins.tooltip.titleColor = css("--paper");
+    Chart.defaults.plugins.tooltip.bodyColor = css("--paper");
+  }
 
   for (const chart of charts) {
     for (const ds of chart.data.datasets) {
@@ -56,9 +79,12 @@ function themeCharts() {
       }
     }
     // Chart.js resolves grid/tick colours once, so set them explicitly here.
-    for (const scale of Object.values(chart.options.scales || {})) {
-      if (scale.ticks) scale.ticks.color = css("--muted");
-      if (scale.grid) scale.grid.color = css("--rule");
+    const scales = chart.options && chart.options.scales;
+    if (scales) {
+      for (const scale of Object.values(scales)) {
+        if (scale.ticks) scale.ticks.color = css("--muted");
+        if (scale.grid) scale.grid.color = css("--rule");
+      }
     }
     chart.update("none");
   }
@@ -93,7 +119,7 @@ function applyTheme(theme) {
   }
   // Follow the OS only while the user has not made an explicit choice.
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  if (mq.addEventListener) {
+  if (mq && typeof mq.addEventListener === "function") {
     mq.addEventListener("change", (e) => {
       let saved = null;
       try {
@@ -156,27 +182,34 @@ function barChart(canvas, labels, values, colorVar) {
 // Render: prediction
 // =========================================================================
 function renderPrediction(p) {
-  const lastClose = p.last_close ?? p.hist?.[p.hist.length - 1]?.close;
+  const hist = Array.isArray(p.hist) ? p.hist : [];
+  const lastHist = hist.length ? hist[hist.length - 1] : null;
+  const lastClose =
+    (isNum(p.last_close) && p.last_close) ||
+    (lastHist && isNum(lastHist.close) && lastHist.close) ||
+    (isNum(lastHist) && lastHist) ||
+    null;
+
   $("price").textContent = lastClose != null ? usd.format(lastClose) : "—";
 
   const delta = $("delta");
-  const change = p.change ?? 0;
-  const pct = p.change_pct ?? 0;
+  const change = isNum(p.change) ? p.change : 0;
+  const pct = isNum(p.change_pct) ? p.change_pct : 0;
   delta.textContent = `${change >= 0 ? "+" : ""}${change.toFixed(2)} (${pct.toFixed(2)}%)`;
   delta.classList.toggle("up", change >= 0);
   delta.classList.toggle("down", change < 0);
 
   const status = $("status");
-  if (p.forecast != null) {
+  if (isNum(p.forecast)) {
     status.textContent = `Forecast for next session: ${usd.format(p.forecast)}`;
     status.classList.remove("error");
   }
 
-  // Expecting p.labels, p.hist, p.fc from the backend.
-  // Adjust these three lines if your response uses different field names.
-  const labels = [...(p.labels || [])];
-  const histValues = [...(p.hist || [])];
-  const fcValues = [...(p.fc || [])];
+  // Expecting p.labels, p.hist, p.fc. If your backend uses different keys,
+  // adjust these three lines — the rest of the chart config stays the same.
+  const labels = Array.isArray(p.labels) ? [...p.labels] : [];
+  const histValues = hist.map((h) => (isNum(h) ? h : h && h.close));
+  const fcValues = Array.isArray(p.fc) ? [...p.fc] : [];
 
   track(
     new Chart($("price-chart"), {
@@ -233,34 +266,57 @@ function renderPrediction(p) {
 // =========================================================================
 // Render: explanations
 // =========================================================================
-// NOTE: this block is unchanged from the repo on purpose — it still reads
-// `ex.timestep_importance` / `ex.feature_importance.values`, which the
-// backend does not return. Flagged separately; not part of the theme change.
+// Handles both response shapes we might see:
+//   A) { feature_importance: { labels:[…], mean_abs:[…], share_pct:[…] } }
+//   B) { shap: {…}, lime: {…} }   (values either array-parallel to labels,
+//                                  or a { featureName: number } map)
 function renderExplain(ex) {
   const grid = $("explain-grid");
   grid.innerHTML = "";
   let shown = 0;
 
-  if (
-    ex.timestep_importance &&
-    Array.isArray(ex.timestep_importance.values) &&
-    ex.timestep_importance.values.length > 1
-  ) {
-    const canvas = addBlock(
-      grid,
-      "Timestep importance",
-      "Contribution of each of the last N sessions."
-    );
-    barChart(canvas, ["1", "2", "3", "4", "5"], ex.timestep_importance.values, "--series-a");
-    shown++;
+  // Shape A — one combined importance object.
+  const fi = ex && ex.feature_importance;
+  if (fi && Array.isArray(fi.labels) && fi.labels.length) {
+    const vals = Array.isArray(fi.share_pct)
+      ? fi.share_pct
+      : Array.isArray(fi.mean_abs)
+      ? fi.mean_abs
+      : null;
+    if (vals && vals.length === fi.labels.length) {
+      const canvas = addBlock(
+        grid,
+        "Feature importance",
+        "Average absolute impact of each input on the forecast."
+      );
+      barChart(canvas, fi.labels, vals, "--series-a");
+      shown++;
+    }
   }
 
+  // Shape B — separate SHAP / LIME blocks.
   [["shap", "SHAP", "--series-a"], ["lime", "LIME", "--series-b"]].forEach(
     ([key, name, colorVar]) => {
-      const block = ex[key];
-      if (!block || !block.values) return;
-      const labels = Object.keys(block.values);
-      const values = labels.map((k) => block.values[k]);
+      const block = ex && ex[key];
+      if (!block) return;
+
+      let labels = null;
+      let values = null;
+
+      if (Array.isArray(block.labels) && Array.isArray(block.values)) {
+        labels = block.labels;
+        values = block.values;
+      } else if (
+        block.values &&
+        typeof block.values === "object" &&
+        !Array.isArray(block.values)
+      ) {
+        labels = Object.keys(block.values);
+        values = labels.map((k) => block.values[k]);
+      }
+
+      if (!labels || !values) return;
+
       const canvas = addBlock(
         grid,
         `${name} feature importance`,
@@ -270,6 +326,21 @@ function renderExplain(ex) {
       shown++;
     }
   );
+
+  // Optional per-timestep chart, if the backend ever returns it.
+  const ti = ex && ex.timestep_importance;
+  if (ti && Array.isArray(ti.values) && ti.values.length > 1) {
+    const tiLabels = Array.isArray(ti.labels)
+      ? ti.labels
+      : ti.values.map((_, i) => String(i + 1));
+    const canvas = addBlock(
+      grid,
+      "Timestep importance",
+      "Contribution of each of the last N sessions."
+    );
+    barChart(canvas, tiLabels, ti.values, "--series-a");
+    shown++;
+  }
 
   if (!shown) {
     const p = document.createElement("p");
@@ -284,6 +355,13 @@ function renderExplain(ex) {
 // =========================================================================
 async function boot() {
   const status = $("status");
+
+  if (!API) {
+    status.textContent = "API base URL is not configured.";
+    status.classList.add("error");
+    return;
+  }
+
   try {
     const prediction = await getJSON("/api/predict");
     renderPrediction(prediction);
@@ -292,6 +370,7 @@ async function boot() {
     status.classList.add("error");
     return;
   }
+
   try {
     const explain = await getJSON("/api/explain");
     renderExplain(explain);
@@ -301,7 +380,7 @@ async function boot() {
       grid.innerHTML = "";
       const p = document.createElement("p");
       p.className = "sub";
-      p.textContent = "Could not load the explanation data.";
+      p.textContent = `Could not load the explanation data: ${err.message}`;
       grid.appendChild(p);
     }
   }
