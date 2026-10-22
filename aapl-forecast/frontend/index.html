@@ -1,49 +1,78 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AAPL next-day close forecast</title>
-  <meta name="description" content="Next trading day closing price forecast for Apple (AAPL) from a CNN-LSTM model with SHAP and LIME explanations." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Theme resolved before first paint to avoid a flash of the wrong palette. -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("theme");
+        var dark = saved
+          ? saved === "dark"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
+
+  <title>AAPL forecast</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=2">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <header class="top">
     <span class="brand">AAPL forecast</span>
-    <span class="model">CNN-LSTM with SHAP and LIME</span>
+    <div class="top-right">
+      <span class="model">CNN-LSTM with SHAP and LIME</span>
+      <button id="theme-toggle" class="theme-toggle" type="button"
+              aria-pressed="false" aria-label="Switch to dark theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+        <span class="theme-toggle-label">Dark</span>
+      </button>
+    </div>
   </header>
 
   <main>
-    <section class="hero" aria-live="polite">
-      <p id="target-label" class="hero-label">Forecast closing price</p>
-      <p id="price" class="price" aria-label="Predicted closing price">--</p>
-      <p id="delta" class="delta"></p>
-      <p id="status" class="status">Loading forecast…</p>
+    <section class="hero">
+      <p class="hero-label">Last close</p>
+      <p class="price" id="price">—</p>
+      <p class="delta" id="delta"></p>
+      <p class="status" id="status">Waking the server…</p>
     </section>
 
     <section class="panel">
-      <h2>Last 90 trading days and the forecast</h2>
-      <div class="chart-box"><canvas id="price-chart" role="img" aria-label="AAPL closing price history with forecast"></canvas></div>
+      <h2>Closing price and next-day forecast</h2>
+      <p class="lede">Recent sessions of history with a one-step-ahead projection.</p>
+      <div class="chart-box"><canvas id="price-chart"></canvas></div>
     </section>
 
     <section class="panel">
-      <h2>Why the model says this</h2>
-      <p class="lede">Importance scores computed from the trained model. Longer bars mean that input moved the forecast more.</p>
+      <h2>What drove the forecast</h2>
+      <p class="lede">Feature contributions from the trained explainer artifacts.</p>
       <div class="explain-grid" id="explain-grid"></div>
-      <p id="explain-note" class="status"></p>
     </section>
   </main>
 
   <footer>
-    <p>Educational research project. This is a statistical forecast, not financial advice. Predictions can be wrong, and past prices do not guarantee future prices.</p>
-    <p id="meta"></p>
+    <p>Forecasts are statistical estimates, not investment advice.</p>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
