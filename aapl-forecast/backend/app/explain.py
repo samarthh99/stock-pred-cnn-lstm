@@ -23,12 +23,13 @@ def _pack(labels, values, rank=True):
     return {"labels": labels, "mean_abs": values.round(6).tolist(), "share_pct": _share(values).round(2).tolist()}
 
 
-@lru_cache(maxsize=1)
-def get_explanations() -> dict:
+@lru_cache(maxsize=8)
+def get_explanations(ticker: str) -> dict:
+    p = config.paths(ticker)
     out = {"shap": {"available": False}, "lime": {"available": False}}
 
-    if config.SHAP_PATH.exists():
-        z = np.load(config.SHAP_PATH, allow_pickle=False)
+    if p["shap"].exists():
+        z = np.load(p["shap"], allow_pickle=False)
         sv = np.abs(z["shap_values"].astype(float))                 # (windows, features)
         names = [str(n) for n in z["feature_names"]]
         out["shap"] = {
@@ -37,8 +38,8 @@ def get_explanations() -> dict:
             "feature_importance": _pack(names, sv.mean(axis=0)),
         }
 
-    if config.LIME_PATH.exists():
-        z = np.load(config.LIME_PATH, allow_pickle=False)
+    if p["lime"].exists():
+        z = np.load(p["lime"], allow_pickle=False)
         w = z["lime_weights"].astype(float)                         # (windows, blocks, features)
         names = [str(n) for n in z["feature_names"]]
         blocks = [str(b) for b in z["block_labels"]]
