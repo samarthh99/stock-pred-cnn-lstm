@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AAPL next-day close forecast</title>
-  <meta name="description" content="Next trading day closing price forecast for Apple (AAPL) from a CNN-LSTM model with SHAP and LIME explanations." />
+  <title>Next-day close forecast</title>
+  <meta name="description" content="Next trading day closing price forecast for Apple (AAPL) and Microsoft (MSFT) from CNN-LSTM models with SHAP and LIME explanations." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -12,7 +12,8 @@
 </head>
 <body>
   <header class="top">
-    <span class="brand">AAPL forecast</span>
+    <span class="brand">Stock forecast</span>
+    <nav id="ticker-tabs" class="tabs" aria-label="Choose a stock"></nav>
     <span class="model">CNN-LSTM with SHAP and LIME</span>
   </header>
 
@@ -26,7 +27,7 @@
 
     <section class="panel">
       <h2>Last 90 trading days and the forecast</h2>
-      <div class="chart-box"><canvas id="price-chart" role="img" aria-label="AAPL closing price history with forecast"></canvas></div>
+      <div class="chart-box"><canvas id="price-chart" role="img" aria-label="Closing price history with forecast"></canvas></div>
     </section>
 
     <section class="panel">
