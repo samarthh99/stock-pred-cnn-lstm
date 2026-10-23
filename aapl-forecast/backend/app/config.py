@@ -4,13 +4,26 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", BASE_DIR / "artifacts"))
 
-MODEL_PATH = ARTIFACT_DIR / "aapl_cnn_lstm_model.keras"
-SCALER_PATH = ARTIFACT_DIR / "x_scaler.pkl"       # saved by your Colab script
-CONFIG_PATH = ARTIFACT_DIR / "config.json"        # lookback, features, IQR clip bounds
-SHAP_PATH = ARTIFACT_DIR / "shap_results.npz"
-LIME_PATH = ARTIFACT_DIR / "lime_results.npz"
+# One folder per ticker: artifacts/<TICKER>/{model.keras, x_scaler.pkl, shap_results.npz, lime_results.npz}
+# To add a new stock later: add it here and drop its 4 files in artifacts/<TICKER>/.
+TICKERS = {
+    "AAPL": "Apple",
+    "MSFT": "Microsoft",
+}
+DEFAULT_TICKER = os.getenv("DEFAULT_TICKER", "AAPL")
 
-TICKER = os.getenv("TICKER", "AAPL")
+
+def paths(ticker: str) -> dict:
+    d = ARTIFACT_DIR / ticker
+    return {
+        "model": d / "model.keras",
+        "scaler": d / "x_scaler.pkl",
+        "meta": d / "meta.json",      # optional: {"features": [...], "lookback": 60, "iqr_clip_bounds": {...}}
+        "shap": d / "shap_results.npz",
+        "lime": d / "lime_results.npz",
+    }
+
+
 DATA_START = "2020-01-01"   # same start as training (EMA/RSI/MACD are recursive)
 WARMUP = 30                 # rows dropped while indicators warm up (same as training)
 
