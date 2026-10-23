@@ -6,6 +6,12 @@
   const fmtDate = (iso) =>
     new Date(iso + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
 
+  let current = null;          // selected ticker symbol
+  let tickers = [];            // [{symbol, name}]
+  let priceChart = null;       // Chart instances, destroyed on every ticker switch
+  let explainCharts = [];
+  let token = 0;               // ignores responses from a ticker the user already switched away from
+
   async function getJSON(path, onSlow) {
     const ctrl = new AbortController();
     const abort = setTimeout(() => ctrl.abort(), 120000);
@@ -23,7 +29,38 @@
     }
   }
 
+  function renderTabs() {
+    const nav = $("ticker-tabs");
+    nav.innerHTML = "";
+    tickers.forEach((t) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tab" + (t.symbol === current ? " active" : "");
+      b.textContent = t.symbol;
+      b.title = t.name;
+      b.setAttribute("aria-pressed", String(t.symbol === current));
+      b.addEventListener("click", () => select(t.symbol));
+      nav.appendChild(b);
+    });
+  }
+
+  function resetView() {
+    if (priceChart) { priceChart.destroy(); priceChart = null; }
+    explainCharts.forEach((c) => c.destroy());
+    explainCharts = [];
+    $("explain-grid").innerHTML = "";
+    $("explain-note").textContent = "";
+    $("price").textContent = "--";
+    $("delta").textContent = "";
+    $("delta").className = "delta";
+    $("meta").textContent = "";
+    $("status").className = "status";
+    $("status").textContent = "Loading forecast…";
+    $("target-label").textContent = "Forecast closing price";
+  }
+
   function renderPrediction(d) {
+    document.title = `${d.ticker} next-day close forecast`;
     $("target-label").textContent = `${d.ticker} forecast close for ${fmtDate(d.target_date)}`;
     $("price").textContent = usd.format(d.predicted_close);
     const up = d.change >= 0;
@@ -36,7 +73,7 @@
     const labels = d.history.map((h) => h.date).concat(d.target_date);
     const hist = d.history.map((h) => h.close).concat(null);
     const fc = new Array(d.history.length - 1).fill(null).concat(d.last_close, d.predicted_close);
-    new Chart($("price-chart"), {
+    priceChart = new Chart($("price-chart"), {
       type: "line",
       data: {
         labels,
@@ -57,13 +94,14 @@
   }
 
   function barChart(canvas, labels, values, color) {
-    new Chart(canvas, {
+    const c = new Chart(canvas, {
       type: "bar",
       data: { labels, datasets: [{ data: values, backgroundColor: color }] },
       options: { responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: { x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } }, y: { beginAtZero: true } } },
     });
+    explainCharts.push(c);
   }
 
   function addBlock(grid, title, sub) {
@@ -76,42 +114,62 @@
     return canvas;
   }
 
+  // The API returns { labels: [...], mean_abs: [...], share_pct: [...] } for each importance block.
   function renderExplain(d) {
     const grid = $("explain-grid");
     let shown = 0;
     [["shap", "SHAP", css("--teal")], ["lime", "LIME", css("--amber")]].forEach(([k, name, color]) => {
       const ex = d[k];
       if (!ex || !ex.available) return;
-      if (ex.timestep_importance) {
-        const n = ex.timestep_importance.values.length;
-        const labels = ex.timestep_importance.values.map((_, i) => (i === n - 1 ? "latest day" : `${n - 1 - i} days ago`));
-        barChart(addBlock(grid, `${name}: which past days mattered`, `Average absolute impact of each of the last ${n} days`),
-          labels, ex.timestep_importance.values, color);
+      if (ex.feature_importance && ex.feature_importance.labels.length > 1) {
+        barChart(addBlock(grid, `${name}: which inputs mattered`, "Average absolute impact of each input"),
+          ex.feature_importance.labels, ex.feature_importance.mean_abs, color);
         shown++;
       }
-      if (ex.feature_importance && Object.keys(ex.feature_importance.values).length > 1) {
-        const f = ex.feature_importance.values;
-        barChart(addBlock(grid, `${name}: which inputs mattered`, "Average absolute impact of each input"),
-          Object.keys(f), Object.values(f), color);
+      if (ex.time_block_importance && ex.time_block_importance.labels.length > 1) {
+        barChart(addBlock(grid, `${name}: which past days mattered`, "Average absolute impact of each block of days (t = latest day)"),
+          ex.time_block_importance.labels, ex.time_block_importance.mean_abs, color);
         shown++;
       }
     });
     if (!shown) $("explain-note").textContent = "Explanation charts are not available for the saved SHAP/LIME arrays.";
   }
 
-  (async () => {
+  async function select(symbol) {
+    current = symbol;
+    const my = ++token;
+    history.replaceState(null, "", "#" + symbol);
+    renderTabs();
+    resetView();
     try {
-      const pred = await getJSON("/api/predict", () => {
-        $("status").textContent = "Waking the server. The first request after a quiet period can take up to a minute.";
+      const q = `?ticker=${encodeURIComponent(symbol)}`;
+      const pred = await getJSON("/api/predict" + q, () => {
+        if (my === token) $("status").textContent = "Waking the server. The first request after a quiet period can take up to a minute.";
       });
+      if (my !== token) return;
       renderPrediction(pred);
-      getJSON("/api/explain").then(renderExplain).catch(() => {
-        $("explain-note").textContent = "Could not load the explanation data.";
+      getJSON("/api/explain" + q).then((ex) => { if (my === token) renderExplain(ex); }).catch(() => {
+        if (my === token) $("explain-note").textContent = "Could not load the explanation data.";
       });
     } catch (err) {
+      if (my !== token) return;
       $("price").textContent = "--";
       $("status").className = "status error";
-      $("status").textContent = `Could not load the forecast: ${err.message}. Refresh to try again.`;
+      $("status").textContent = `Could not load the ${symbol} forecast: ${err.message}. Refresh to try again.`;
     }
+  }
+
+  (async () => {
+    try {
+      const info = await getJSON("/api/tickers", () => {
+        $("status").textContent = "Waking the server. The first request after a quiet period can take up to a minute.";
+      });
+      tickers = info.tickers;
+    } catch (_) {
+      tickers = [{ symbol: "AAPL", name: "Apple" }, { symbol: "MSFT", name: "Microsoft" }];   // fallback
+    }
+    const fromHash = location.hash.replace("#", "").toUpperCase();
+    const start = tickers.some((t) => t.symbol === fromHash) ? fromHash : (tickers[0] && tickers[0].symbol);
+    select(start);
   })();
 })();
