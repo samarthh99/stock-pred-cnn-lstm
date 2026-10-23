@@ -45,3 +45,14 @@ footer { max-width: 960px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; color: 
 footer p { margin: 0 0 .5rem; max-width: 70ch; }
 a:focus-visible, button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ticker tabs */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab {
+  font: inherit; font-weight: 600; cursor: pointer;
+  padding: 6px 14px; border-radius: 999px;
+  border: 1px solid currentColor; background: transparent; color: inherit; opacity: .65;
+}
+.tab:hover { opacity: 1; }
+.tab.active { opacity: 1; background: var(--teal, #0f766e); border-color: var(--teal, #0f766e); color: #fff; }
+.tab:focus-visible { outline: 2px solid var(--amber, #d97706); outline-offset: 2px; }
