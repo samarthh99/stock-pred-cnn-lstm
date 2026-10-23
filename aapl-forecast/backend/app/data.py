@@ -14,7 +14,7 @@ from . import config
 
 log = logging.getLogger("data")
 NY = ZoneInfo("America/New_York")
-_cache = {"df": None, "at": 0.0}
+_cache: dict = {}   # ticker -> {"df": DataFrame, "at": timestamp}
 
 
 class NYSECalendar(AbstractHolidayCalendar):
@@ -28,8 +28,8 @@ class NYSECalendar(AbstractHolidayCalendar):
     ]
 
 
-def _download() -> pd.DataFrame:
-    df = yf.download(config.TICKER, start=config.DATA_START, interval="1d",
+def _download(ticker: str) -> pd.DataFrame:
+    df = yf.download(ticker, start=config.DATA_START, interval="1d",
                      progress=False, auto_adjust=True, threads=False)
     if df is None or df.empty:
         raise RuntimeError("Yahoo Finance returned no data")
@@ -41,19 +41,20 @@ def _download() -> pd.DataFrame:
     return df
 
 
-def get_daily() -> pd.DataFrame:
-    """Daily OHLCV since 2020, cached. Falls back to stale cache if Yahoo fails."""
+def get_daily(ticker: str) -> pd.DataFrame:
+    """Daily OHLCV since 2020, cached per ticker. Falls back to stale cache if Yahoo fails."""
     now = time.time()
-    if _cache["df"] is not None and now - _cache["at"] < config.DATA_CACHE_SECONDS:
-        return _cache["df"]
+    hit = _cache.get(ticker)
+    if hit and now - hit["at"] < config.DATA_CACHE_SECONDS:
+        return hit["df"]
     try:
-        df = _download()
-        _cache.update(df=df, at=now)
+        df = _download(ticker)
+        _cache[ticker] = {"df": df, "at": now}
         return df
     except Exception as exc:
-        log.warning("download failed: %s", exc)
-        if _cache["df"] is not None:
-            return _cache["df"]
+        log.warning("download failed for %s: %s", ticker, exc)
+        if hit:
+            return hit["df"]
         raise
 
 
